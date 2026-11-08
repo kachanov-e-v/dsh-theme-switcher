@@ -311,6 +311,35 @@ for (const theme of THEMES) {
   theme.title = themeTitle(theme.id);
 }
 
+/*
+ * DSH сохраняет в своих настройках только встроенные темы (light/dark/system),
+ * поэтому выбранную тему плагина храним сами — в localStorage страницы.
+ * При перезагрузке/перезапуске и после смены модели тема восстанавливается.
+ */
+const THEME_STORAGE_KEY = 'dsh-theme-switcher:active-theme';
+
+function isCustomTheme(id) {
+  return typeof id === 'string' && Object.prototype.hasOwnProperty.call(THEME_BY_ID, id);
+}
+
+function readStoredTheme() {
+  try {
+    const id = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return isCustomTheme(id) ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStoredTheme(id) {
+  try {
+    if (isCustomTheme(id)) window.localStorage.setItem(THEME_STORAGE_KEY, id);
+    else window.localStorage.removeItem(THEME_STORAGE_KEY);
+  } catch {
+    /* приватный режим или запрет хранилища — работаем без сохранения */
+  }
+}
+
 window.__ModuleLoader__.load({
   id: '@local/dsh-theme-switcher',
   factory(require) {
@@ -319,7 +348,7 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useRef } = React;
 
     /** Выпадающий список тем. `wide` — развёрнута ли боковая панель. */
-    function ThemeDropdown({ themeService, t, wide, getActiveTheme, subscribeTheme }) {
+    function ThemeDropdown({ t, wide, getActiveTheme, subscribeTheme, selectTheme }) {
       const [open, setOpen] = useState(false);
       const [currentId, setCurrentId] = useState(() => getActiveTheme());
       const [rect, setRect] = useState(null);
@@ -448,7 +477,7 @@ window.__ModuleLoader__.load({
         'aria-selected': theme.id === currentId,
         onClick: () => {
           try {
-            themeService.setTheme(theme.id);
+            selectTheme(theme.id);
           } catch (error) {
             console.error('dsh-theme-switcher: не удалось переключить тему', error);
           }
@@ -508,7 +537,7 @@ window.__ModuleLoader__.load({
     }
 
     /** Страница настроек темы с карточками предпросмотра. */
-    function ThemeSettingsPage({ themeService, t, getActiveTheme, subscribeTheme }) {
+    function ThemeSettingsPage({ t, getActiveTheme, subscribeTheme, selectTheme }) {
       const [currentId, setCurrentId] = useState(() => getActiveTheme());
 
       useEffect(() => {
@@ -519,7 +548,7 @@ window.__ModuleLoader__.load({
 
       const select = (id) => {
         try {
-          themeService.setTheme(id);
+          selectTheme(id);
         } catch (error) {
           console.error('dsh-theme-switcher: не удалось переключить тему', error);
         }
@@ -683,11 +712,45 @@ window.__ModuleLoader__.load({
 
         const t = locale.bind('dsh-theme-switcher');
 
+        const selectTheme = (id) => {
+          writeStoredTheme(id);
+          themeService.setTheme(id);
+        };
+
+        const themeListeners = new Set();
+        const restoreWindowUntil = Date.now() + 4000;
+
+        /** Вернуть сохранённую тему, если DSH сейчас показывает встроенную. */
+        const applyStoredTheme = () => {
+          const stored = readStoredTheme();
+          if (stored === undefined) return;
+          const snapshot = themeService.getTheme();
+          if (snapshot.preference === stored) return;
+          // Пользователь выбрал другую тему плагина — не перебиваем.
+          if (isCustomTheme(snapshot.preference)) return;
+          try {
+            themeService.setTheme(stored);
+          } catch (error) {
+            console.error('dsh-theme-switcher: не удалось восстановить тему', error);
+            writeStoredTheme(undefined);
+          }
+        };
+
         // Служба темы не имеет subscribe(): единственный канал изменений — событие
         // theme/change на контексте. Держим один набор подписчиков для компонентов.
-        const themeListeners = new Set();
         ctx.effect(() => {
           const off = ctx.on('theme/change', () => {
+            const snapshot = themeService.getTheme();
+            if (!isCustomTheme(snapshot.preference) && readStoredTheme() !== undefined) {
+              if (Date.now() < restoreWindowUntil) {
+                // Хост применил сохранённую встроенную тему после старта —
+                // возвращаем выбранную тему плагина.
+                window.setTimeout(applyStoredTheme, 0);
+              } else {
+                // Пользователь сам выбрал встроенную тему — забываем свою.
+                writeStoredTheme(undefined);
+              }
+            }
             for (const listener of [...themeListeners]) {
               try {
                 listener();
@@ -700,6 +763,15 @@ window.__ModuleLoader__.load({
             if (typeof off === 'function') off();
           };
         }, 'dsh-theme-switcher: theme/change');
+
+        // Настройки DSH приходят с хоста асинхронно — пробуем восстановить
+        // сохранённую тему несколько раз после старта страницы.
+        ctx.effect(() => {
+          const timers = [0, 250, 1000, 2500].map((delay) => window.setTimeout(applyStoredTheme, delay));
+          return () => {
+            for (const timer of timers) window.clearTimeout(timer);
+          };
+        }, 'dsh-theme-switcher: restore theme');
 
         const getActiveTheme = () => themeService.getTheme().active.id;
         const subscribeTheme = (listener) => {
@@ -717,11 +789,11 @@ window.__ModuleLoader__.load({
           label: () => t('themeSelectorLabel'),
           locale: 'dsh-theme-switcher',
         }, (props) => h(ThemeDropdown, {
-          themeService,
           t,
           wide: props && props.wide === true,
           getActiveTheme,
           subscribeTheme,
+          selectTheme,
         })));
 
         // Страница «Тема» в настройках.
@@ -731,7 +803,7 @@ window.__ModuleLoader__.load({
           order: 12,
           label: () => t('themeSettingsTitle'),
           locale: 'dsh-theme-switcher',
-        }, () => h(ThemeSettingsPage, { themeService, t, getActiveTheme, subscribeTheme })));
+        }, () => h(ThemeSettingsPage, { t, getActiveTheme, subscribeTheme, selectTheme })));
       },
     };
   },
