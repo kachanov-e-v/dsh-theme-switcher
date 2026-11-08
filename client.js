@@ -99,18 +99,18 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useRef } = React;
 
     /** Выпадающий список тем. `wide` — развёрнута ли боковая панель. */
-    function ThemeDropdown({ themeService, t, wide }) {
+    function ThemeDropdown({ themeService, t, wide, getActiveTheme, subscribeTheme }) {
       const [open, setOpen] = useState(false);
-      const [currentId, setCurrentId] = useState(() => themeService.getTheme().active.id);
+      const [currentId, setCurrentId] = useState(() => getActiveTheme());
       const [rect, setRect] = useState(null);
       const rootRef = useRef(null);
       const triggerRef = useRef(null);
 
       useEffect(() => {
-        return themeService.subscribe(() => {
-          setCurrentId(themeService.getTheme().active.id);
+        return subscribeTheme(() => {
+          setCurrentId(getActiveTheme());
         });
-      }, [themeService]);
+      }, [getActiveTheme, subscribeTheme]);
 
       useEffect(() => {
         if (!open) return undefined;
@@ -288,14 +288,14 @@ window.__ModuleLoader__.load({
     }
 
     /** Страница настроек темы с карточками предпросмотра. */
-    function ThemeSettingsPage({ themeService, t }) {
-      const [currentId, setCurrentId] = useState(() => themeService.getTheme().active.id);
+    function ThemeSettingsPage({ themeService, t, getActiveTheme, subscribeTheme }) {
+      const [currentId, setCurrentId] = useState(() => getActiveTheme());
 
       useEffect(() => {
-        return themeService.subscribe(() => {
-          setCurrentId(themeService.getTheme().active.id);
+        return subscribeTheme(() => {
+          setCurrentId(getActiveTheme());
         });
-      }, [themeService]);
+      }, [getActiveTheme, subscribeTheme]);
 
       const select = (id) => {
         try {
@@ -463,6 +463,32 @@ window.__ModuleLoader__.load({
 
         const t = locale.bind('dsh-theme-switcher');
 
+        // Служба темы не имеет subscribe(): единственный канал изменений — событие
+        // theme/change на контексте. Держим один набор подписчиков для компонентов.
+        const themeListeners = new Set();
+        ctx.effect(() => {
+          const off = ctx.on('theme/change', () => {
+            for (const listener of [...themeListeners]) {
+              try {
+                listener();
+              } catch (error) {
+                console.error('dsh-theme-switcher: ошибка подписчика темы', error);
+              }
+            }
+          });
+          return () => {
+            if (typeof off === 'function') off();
+          };
+        }, 'dsh-theme-switcher: theme/change');
+
+        const getActiveTheme = () => themeService.getTheme().active.id;
+        const subscribeTheme = (listener) => {
+          themeListeners.add(listener);
+          return () => {
+            themeListeners.delete(listener);
+          };
+        };
+
         // Выпадающий список в подвале боковой панели.
         slots.inject('sidebar.footer.action', () => slots.register({
           name: 'sidebar.footer.action',
@@ -474,6 +500,8 @@ window.__ModuleLoader__.load({
           themeService,
           t,
           wide: props && props.wide === true,
+          getActiveTheme,
+          subscribeTheme,
         })));
 
         // Страница «Тема» в настройках.
@@ -483,7 +511,7 @@ window.__ModuleLoader__.load({
           order: 12,
           label: () => t('themeSettingsTitle'),
           locale: 'dsh-theme-switcher',
-        }, () => h(ThemeSettingsPage, { themeService, t })));
+        }, () => h(ThemeSettingsPage, { themeService, t, getActiveTheme, subscribeTheme })));
       },
     };
   },
