@@ -34,323 +34,331 @@ const THEME_DEFINITIONS_RAW = [
   {"codeThemeId":"codex","theme":{"accent":"#3a83f7","accentSource":"chatgpt","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#ededed","opaqueWindows":true,"semanticColors":{"diffAdded":"#40c977","diffRemoved":"#fa423e","skill":"#ad7bf9"},"surface":"#000000"},"variant":"dark"}
 ];
 
+/** Осветление/затемнение HEX-цвета на заданную величину. */
+function adjust(hex, amount) {
+  if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
+  const num = parseInt(hex.slice(1), 16);
+  const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00ff) + amount));
+  const b = Math.max(0, Math.min(255, (num & 0x0000ff) + amount));
+  return '#' + (0x1000000 + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
 /**
- * Конвертация темы из формата DESIGN.json в формат DSH ThemeDefinition
+ * Конвертация темы из формата DESIGN.json в формат DSH ThemeDefinition.
+ * ThemeDefinition: { id, colorScheme: 'light'|'dark', tokens: Record<string,string> }.
  */
 function convertTheme(raw) {
-  const { codeThemeId, theme, variant } = raw;
-  const { accent, fonts, ink, semanticColors, surface } = theme;
-
-  // Функция для осветления/затемнения цвета
-  function adjust(hex, amount) {
-    if (!hex) return hex;
-    const num = parseInt(hex.replace('#', ''), 16);
-    const r = Math.max(0, Math.min(255, (num >> 16) + amount));
-    const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00FF) + amount));
-    const b = Math.max(0, Math.min(255, (num & 0x0000FF) + amount));
-    return '#' + (0x1000000 + (r << 16) + (g << 8) + b).toString(16).slice(1);
-  }
-
-  const colorScheme = variant === 'light' ? 'light' : 'dark';
+  const { codeThemeId, theme } = raw;
+  const { accent, ink, semanticColors, surface } = theme;
+  const colorScheme = raw.variant === 'light' ? 'light' : 'dark';
+  const delta = colorScheme === 'dark' ? 1 : -1;
 
   return {
     id: codeThemeId,
-    name: codeThemeId.charAt(0).toUpperCase() + codeThemeId.slice(1).replace(/-/g, ' '),
-    colorScheme: colorScheme,
+    colorScheme,
     tokens: {
       '--dsw-alias-bg-base': surface,
-      '--dsw-alias-bg-layer-1': adjust(surface, colorScheme === 'dark' ? 10 : -5),
-      '--dsw-alias-bg-layer-2': adjust(surface, colorScheme === 'dark' ? 20 : -10),
-      '--dsw-alias-bg-overlay': adjust(surface, colorScheme === 'dark' ? 15 : -8),
-      '--dsw-alias-border-l1': adjust(ink, colorScheme === 'dark' ? -60 : 40),
-      '--dsw-alias-border-l2': adjust(ink, colorScheme === 'dark' ? -40 : 20),
+      '--dsw-alias-bg-layer-1': adjust(surface, 10 * delta),
+      '--dsw-alias-bg-layer-2': adjust(surface, 20 * delta),
+      '--dsw-alias-bg-overlay': adjust(surface, 15 * delta),
+      '--dsw-alias-border-l1': adjust(ink, -60 * delta),
+      '--dsw-alias-border-l2': adjust(ink, -40 * delta),
       '--dsw-alias-brand-primary': accent,
       '--dsw-alias-label-primary': ink,
-      '--dsw-alias-label-secondary': adjust(ink, colorScheme === 'dark' ? -30 : 20),
+      '--dsw-alias-label-secondary': adjust(ink, -30 * delta),
       '--dsw-alias-state-error-primary': semanticColors.diffRemoved,
       '--dsw-alias-state-idle-primary': adjust(accent, -20),
       '--dsw-alias-state-success-primary': semanticColors.diffAdded,
       '--dsw-alias-state-warn-primary': '#f5a623',
-      '--dsw-specific-sidebar-fill': adjust(surface, colorScheme === 'dark' ? 5 : -3),
+      '--dsw-specific-sidebar-fill': adjust(surface, 5 * delta),
     },
   };
 }
 
+/** Отображаемое имя темы (бренды оставляем латиницей). */
+function themeTitle(id) {
+  return id
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 const THEMES = THEME_DEFINITIONS_RAW.map(convertTheme);
-const THEME_MAP = {};
-THEMES.forEach(t => { THEME_MAP[t.id] = t; });
+const THEME_BY_ID = Object.create(null);
+for (const theme of THEMES) {
+  THEME_BY_ID[theme.id] = theme;
+  theme.title = themeTitle(theme.id);
+}
 
 window.__ModuleLoader__.load({
   id: '@local/dsh-theme-switcher',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
-    const { useState, useEffect, useCallback, useRef } = React;
+    const { useState, useEffect, useRef } = React;
 
-    // --- Компонент выпадающего списка тем ---
-    function ThemeDropdown(props) {
-      const { themeService, t } = props;
-      const [isOpen, setIsOpen] = useState(false);
-      const [currentId, setCurrentId] = useState(themeService.getTheme().active.id);
-      const dropdownRef = useRef(null);
+    /** Выпадающий список тем. `wide` — развёрнута ли боковая панель. */
+    function ThemeDropdown({ themeService, t, wide }) {
+      const [open, setOpen] = useState(false);
+      const [currentId, setCurrentId] = useState(() => themeService.getTheme().active.id);
+      const [rect, setRect] = useState(null);
+      const rootRef = useRef(null);
+      const triggerRef = useRef(null);
 
-      // Подписка на смену темы
       useEffect(() => {
-        const unsub = themeService.subscribe(() => {
+        return themeService.subscribe(() => {
           setCurrentId(themeService.getTheme().active.id);
         });
-        return unsub;
       }, [themeService]);
 
-      // Закрытие по клику вне
       useEffect(() => {
-        function handleClickOutside(e) {
-          if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-            setIsOpen(false);
-          }
+        if (!open) return undefined;
+        const onPointerDown = (event) => {
+          if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false);
+        };
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setOpen(false);
+        };
+        document.addEventListener('mousedown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+          document.removeEventListener('mousedown', onPointerDown);
+          document.removeEventListener('keydown', onKeyDown);
+        };
+      }, [open]);
+
+      const current = THEME_BY_ID[currentId] || {
+        title: currentId === 'light' ? t('builtinLight') : t('builtinDark'),
+        tokens: { '--dsw-alias-brand-primary': 'var(--dsw-alias-brand-primary)' },
+      };
+
+      const toggle = () => {
+        if (!open && triggerRef.current) {
+          const box = triggerRef.current.getBoundingClientRect();
+          setRect({ left: box.left, width: box.width, bottom: window.innerHeight - box.top + 6 });
         }
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-      }, []);
+        setOpen((value) => !value);
+      };
 
-      const currentTheme = THEME_MAP[currentId] || THEMES[0];
-
-      return h('div', {
-        ref: dropdownRef,
-        style: { position: 'relative', display: 'flex', alignItems: 'center' },
-      }, [
-        // Кнопка-триггер
-        h('button', {
-          key: 'trigger',
-          type: 'button',
-          onClick: () => setIsOpen(!isOpen),
-          'aria-expanded': isOpen,
-          'aria-haspopup': 'listbox',
-          'aria-label': t('themeSelectorLabel'),
-          style: {
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '6px 10px',
-            border: '1px solid var(--dsw-alias-border-l1)',
-            borderRadius: 6,
-            background: 'var(--dsw-alias-bg-layer-1)',
-            color: 'var(--dsw-alias-label-primary)',
-            fontSize: 13,
-            fontFamily: 'inherit',
-            cursor: 'pointer',
-            minWidth: 180,
-            justifyContent: 'space-between',
-            transition: 'border-color 0.15s ease, background-color 0.15s ease',
-          },
-        }, [
-          h('div', {
-            key: 'preview',
-            style: {
-              width: 12,
-              height: 12,
-              borderRadius: 3,
-              backgroundColor: currentTheme.tokens['--dsw-alias-brand-primary'],
-              border: '1px solid var(--dsw-alias-border-l1)',
-              flexShrink: 0,
-            },
-          }),
-          h('span', {
-            key: 'name',
-            style: {
-              flex: 1,
-              textAlign: 'left',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            },
-          }, currentTheme.name),
-          h('svg', {
-            key: 'arrow',
-            width: 16,
-            height: 16,
-            viewBox: '0 0 16 16',
-            fill: 'none',
-            style: {
-              color: 'var(--dsw-alias-label-secondary)',
-              flexShrink: 0,
-              transition: 'transform 0.15s ease',
-              transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-            },
-          }, h('path', {
-            d: 'M4 6L8 10L12 6',
-            stroke: 'currentColor',
-            strokeWidth: 2,
-            strokeLinecap: 'round',
-            strokeLinejoin: 'round',
-          })),
-        ]),
-
-        // Выпадающее меню
-        isOpen && h('div', {
-          key: 'dropdown',
-          role: 'listbox',
-          'aria-label': t('themeSelectorLabel'),
-          style: {
-            position: 'absolute',
-            bottom: 'calc(100% + 6px)',
-            left: 0,
-            right: 0,
-            background: 'var(--dsw-alias-bg-overlay)',
-            border: '1px solid var(--dsw-alias-border-l1)',
-            borderRadius: 8,
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.2)',
-            overflow: 'hidden',
-            zIndex: 100,
-            maxHeight: 320,
-            overflowY: 'auto',
-          },
-        }, THEMES.map(theme => h('button', {
-          key: theme.id,
-          type: 'button',
-          role: 'option',
-          'aria-selected': theme.id === currentId,
-          onClick: () => {
-            themeService.setTheme(theme.id);
-            setIsOpen(false);
-          },
-          style: {
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            width: '100%',
-            padding: '10px 12px',
-            border: 'none',
-            background: theme.id === currentId
-              ? 'var(--dsw-alias-brand-primary)'
-              : 'transparent',
-            color: theme.id === currentId
-              ? '#fff'
-              : 'var(--dsw-alias-label-primary)',
-            fontSize: 13,
-            fontFamily: 'inherit',
-            cursor: 'pointer',
-            textAlign: 'left',
-            transition: 'background-color 0.1s ease',
-          },
-        }, [
-          h('div', {
-            key: 'preview',
-            style: {
-              width: 12,
-              height: 12,
-              borderRadius: 3,
-              backgroundColor: theme.tokens['--dsw-alias-brand-primary'],
-              border: theme.id === currentId ? '2px solid #fff' : '1px solid var(--dsw-alias-border-l1)',
-              flexShrink: 0,
-            },
-          }),
-          h('span', {
-            key: 'name',
-            style: {
-              flex: 1,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            },
-          }, theme.name),
-          theme.id === currentId && h('svg', {
-            key: 'check',
-            width: 16,
-            height: 16,
-            viewBox: '0 0 16 16',
-            fill: 'none',
-            style: { color: '#fff', flexShrink: 0 },
-          }, h('path', {
-            d: 'M3.5 8L7 11.5L12.5 4',
-            stroke: 'currentColor',
-            strokeWidth: 2,
-            strokeLinecap: 'round',
-            strokeLinejoin: 'round',
-          })),
-        ]))),
-      ]);
-    }
-
-    // --- Страница настроек темы ---
-    function ThemeSettingsPage(props) {
-      const { themeService, t } = props;
-      const [currentId, setCurrentId] = useState(themeService.getTheme().active.id);
-
-      useEffect(() => {
-        const unsub = themeService.subscribe(() => {
-          setCurrentId(themeService.getTheme().active.id);
-        });
-        return unsub;
-      }, [themeService]);
-
-      return h('div', {
+      const trigger = h('button', {
+        ref: triggerRef,
+        type: 'button',
+        onClick: toggle,
+        'aria-expanded': open,
+        'aria-haspopup': 'listbox',
+        'aria-label': t('themeSelectorLabel'),
+        title: t('themeSelectorLabel'),
         style: {
-          padding: 16,
           display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
+          alignItems: 'center',
+          gap: 8,
+          padding: wide ? '6px 10px' : 0,
+          width: wide ? undefined : 36,
+          height: 36,
+          justifyContent: 'center',
+          border: '1px solid var(--dsw-alias-border-l1)',
+          borderRadius: 8,
+          background: 'var(--dsw-alias-bg-layer-1)',
+          color: 'var(--dsw-alias-label-primary)',
+          fontSize: 13,
+          fontFamily: 'inherit',
+          cursor: 'pointer',
+          boxSizing: 'border-box',
+          transition: 'border-color 0.15s ease, background-color 0.15s ease',
         },
       }, [
-        h('h2', {
+        h('span', {
+          key: 'dot',
           style: {
-            margin: 0,
-            fontSize: 16,
-            fontWeight: 600,
-            color: 'var(--dsw-alias-label-primary)',
+            width: 12,
+            height: 12,
+            borderRadius: 3,
+            backgroundColor: current.tokens['--dsw-alias-brand-primary'],
+            border: '1px solid rgba(127,127,127,0.45)',
+            flexShrink: 0,
           },
-        }, t('themeSettingsTitle')),
-
-        h('p', {
+        }),
+        wide && h('span', {
+          key: 'name',
+          style: { flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+        }, current.title),
+        wide && h('svg', {
+          key: 'chevron',
+          width: 14,
+          height: 14,
+          viewBox: '0 0 16 16',
+          fill: 'none',
           style: {
-            margin: 0,
-            fontSize: 13,
             color: 'var(--dsw-alias-label-secondary)',
+            flexShrink: 0,
+            transform: open ? 'rotate(180deg)' : 'none',
+            transition: 'transform 0.15s ease',
           },
-        }, t('themeSettingsDescription')),
+        }, h('path', {
+          d: 'M4 6L8 10L12 6',
+          stroke: 'currentColor',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        })),
+      ]);
 
+      const menu = open && h('div', {
+        role: 'listbox',
+        'aria-label': t('themeSelectorLabel'),
+        style: {
+          position: 'fixed',
+          left: rect ? rect.left : 0,
+          bottom: rect ? rect.bottom : 0,
+          width: Math.max(rect ? rect.width : 0, 230),
+          maxHeight: 340,
+          overflowY: 'auto',
+          background: 'var(--dsw-alias-bg-overlay)',
+          border: '1px solid var(--dsw-alias-border-l1)',
+          borderRadius: 8,
+          boxShadow: '0 10px 28px rgba(0,0,0,0.35)',
+          zIndex: 1000,
+          padding: 4,
+        },
+      }, THEMES.map((theme) => h('button', {
+        key: theme.id,
+        type: 'button',
+        role: 'option',
+        'aria-selected': theme.id === currentId,
+        onClick: () => {
+          try {
+            themeService.setTheme(theme.id);
+          } catch (error) {
+            console.error('dsh-theme-switcher: не удалось переключить тему', error);
+          }
+          setOpen(false);
+        },
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          padding: '8px 10px',
+          border: 0,
+          borderRadius: 6,
+          background: theme.id === currentId ? 'var(--dsw-alias-brand-primary)' : 'transparent',
+          color: theme.id === currentId ? '#fff' : 'var(--dsw-alias-label-primary)',
+          fontSize: 13,
+          fontFamily: 'inherit',
+          cursor: 'pointer',
+          textAlign: 'left',
+        },
+      }, [
+        h('span', {
+          key: 'dot',
+          style: {
+            width: 12,
+            height: 12,
+            borderRadius: 3,
+            backgroundColor: theme.tokens['--dsw-alias-brand-primary'],
+            border: '1px solid rgba(127,127,127,0.45)',
+            flexShrink: 0,
+          },
+        }),
+        h('span', {
+          key: 'name',
+          style: { flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+        }, theme.title),
+        theme.id === currentId && h('svg', {
+          key: 'check',
+          width: 14,
+          height: 14,
+          viewBox: '0 0 16 16',
+          fill: 'none',
+          style: { flexShrink: 0 },
+        }, h('path', {
+          d: 'M3.5 8L7 11.5L12.5 4',
+          stroke: 'currentColor',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        })),
+      ])));
+
+      return h('div', {
+        ref: rootRef,
+        style: { position: 'relative', display: 'flex', alignItems: 'center' },
+      }, [trigger, menu]);
+    }
+
+    /** Страница настроек темы с карточками предпросмотра. */
+    function ThemeSettingsPage({ themeService, t }) {
+      const [currentId, setCurrentId] = useState(() => themeService.getTheme().active.id);
+
+      useEffect(() => {
+        return themeService.subscribe(() => {
+          setCurrentId(themeService.getTheme().active.id);
+        });
+      }, [themeService]);
+
+      const select = (id) => {
+        try {
+          themeService.setTheme(id);
+        } catch (error) {
+          console.error('dsh-theme-switcher: не удалось переключить тему', error);
+        }
+      };
+
+      return h('div', {
+        style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 16 },
+      }, [
+        h('h2', {
+          key: 'title',
+          style: { margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
+        }, t('themeSettingsTitle')),
+        h('p', {
+          key: 'desc',
+          style: { margin: 0, fontSize: 13, color: 'var(--dsw-alias-label-secondary)' },
+        }, t('themeSettingsDescription')),
         h('div', {
+          key: 'grid',
           style: {
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
             gap: 12,
           },
-        }, THEMES.map(theme => h('button', {
+        }, THEMES.map((theme) => h('button', {
           key: theme.id,
           type: 'button',
-          onClick: () => themeService.setTheme(theme.id),
+          onClick: () => select(theme.id),
           style: {
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'flex-start',
+            alignItems: 'stretch',
             gap: 8,
-            padding: 16,
+            padding: 12,
             border: '2px solid ' + (theme.id === currentId
               ? 'var(--dsw-alias-brand-primary)'
               : 'var(--dsw-alias-border-l1)'),
             borderRadius: 8,
-            background: theme.id === currentId
-              ? 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, var(--dsw-alias-bg-layer-1))'
-              : 'var(--dsw-alias-bg-layer-1)',
+            background: 'var(--dsw-alias-bg-layer-1)',
             color: 'var(--dsw-alias-label-primary)',
             fontSize: 13,
             fontFamily: 'inherit',
             cursor: 'pointer',
             textAlign: 'left',
-            transition: 'all 0.15s ease',
           },
         }, [
           h('div', {
+            key: 'preview',
             style: {
               width: '100%',
-              height: 60,
+              height: 56,
               borderRadius: 6,
               background: 'linear-gradient(135deg, ' + theme.tokens['--dsw-alias-bg-base'] + ', ' + theme.tokens['--dsw-alias-bg-layer-1'] + ')',
               border: '1px solid var(--dsw-alias-border-l1)',
               position: 'relative',
+              overflow: 'hidden',
             },
           }, [
-            h('div', {
+            h('span', {
+              key: 'accent',
               style: {
                 position: 'absolute',
                 top: 8,
@@ -361,17 +369,25 @@ window.__ModuleLoader__.load({
                 backgroundColor: theme.tokens['--dsw-alias-brand-primary'],
               },
             }),
+            h('span', {
+              key: 'ink',
+              style: {
+                position: 'absolute',
+                left: 10,
+                bottom: 10,
+                width: '55%',
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: theme.tokens['--dsw-alias-label-primary'],
+                opacity: 0.65,
+              },
+            }),
           ]),
+          h('span', { key: 'name', style: { fontWeight: 500, fontSize: 14 } }, theme.title),
           h('span', {
-            style: { fontWeight: 500, fontSize: 14 },
-          }, theme.name),
-          h('span', {
-            style: {
-              fontSize: 11,
-              color: 'var(--dsw-alias-label-secondary)',
-              textTransform: 'capitalize',
-            },
-          }, theme.colorScheme),
+            key: 'scheme',
+            style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
+          }, theme.colorScheme === 'dark' ? 'тёмная' : 'светлая'),
         ]))),
       ]);
     }
@@ -381,74 +397,93 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const { slots, theme: themeService, locale } = ctx;
 
-        // Регистрация русского языка
-        const unregisterLang = locale.addLanguage({
-          id: 'ru',
-          label: 'Русский',
-          fallback: 'en',
-        });
+        // Все регистрации привязываем к контексту: при выгрузке/HMR они снимаются.
+        // Без этого повторное применение падало на «theme ... is already registered».
+        ctx.effect(() => {
+          const disposers = [];
 
-        // Регистрация словарей
-        const enDict = {
-          themeSelectorLabel: 'Select theme',
-          themeSettingsTitle: 'Theme settings',
-          themeSettingsDescription: 'Choose a color theme for the interface.',
-        };
-        const zhDict = {
-          themeSelectorLabel: '选择主题',
-          themeSettingsTitle: '主题设置',
-          themeSettingsDescription: '选择界面的颜色主题。',
-        };
-        const ruDict = {
-          themeSelectorLabel: 'Выбрать тему',
-          themeSettingsTitle: 'Настройки темы',
-          themeSettingsDescription: 'Выберите цветовую тему для интерфейса.',
-        };
+          try {
+            disposers.push(locale.addLanguage({ id: 'ru', label: 'Русский', fallback: 'en' }));
+          } catch (error) {
+            console.error('dsh-theme-switcher: не удалось добавить язык ru', error);
+          }
 
-        const unregEn = locale.register('dsh-theme-switcher', 'en', enDict);
-        const unregZh = locale.register('dsh-theme-switcher', 'zh', zhDict);
-        const unregRu = locale.register('dsh-theme-switcher', 'ru', ruDict);
+          const dictionaries = {
+            en: {
+              themeSelectorLabel: 'Select theme',
+              themeSettingsTitle: 'Theme settings',
+              themeSettingsDescription: 'Choose a color theme for the interface.',
+              builtinLight: 'Light (DSH)',
+              builtinDark: 'Dark (DSH)',
+            },
+            zh: {
+              themeSelectorLabel: '选择主题',
+              themeSettingsTitle: '主题设置',
+              themeSettingsDescription: '选择界面的颜色主题。',
+              builtinLight: '浅色 (DSH)',
+              builtinDark: '深色 (DSH)',
+            },
+            ru: {
+              themeSelectorLabel: 'Выбрать тему',
+              themeSettingsTitle: 'Настройки темы',
+              themeSettingsDescription: 'Выберите цветовую тему для интерфейса.',
+              builtinLight: 'Светлая (DSH)',
+              builtinDark: 'Тёмная (DSH)',
+            },
+          };
+          for (const [id, dict] of Object.entries(dictionaries)) {
+            try {
+              disposers.push(locale.register('dsh-theme-switcher', id, dict));
+            } catch (error) {
+              console.error('dsh-theme-switcher: не удалось зарегистрировать словарь ' + id, error);
+            }
+          }
 
-        // Регистрация всех тем из DESIGN.json
-        const unregisterThemes = THEMES.map(themeDef => {
-          return themeService.register(themeDef);
-        });
+          for (const definition of THEMES) {
+            try {
+              disposers.push(themeService.register(definition));
+            } catch (error) {
+              // Тема уже зарегистрирована этим же плагином в предыдущей генерации —
+              // не валим весь плагин из-за одной темы.
+              console.error('dsh-theme-switcher: тема "' + definition.id + '" не зарегистрирована', error);
+            }
+          }
 
-        // Привязка локали
+          return () => {
+            for (let index = disposers.length - 1; index >= 0; index -= 1) {
+              try {
+                const dispose = disposers[index];
+                if (typeof dispose === 'function') dispose();
+              } catch (error) {
+                console.error('dsh-theme-switcher: ошибка очистки', error);
+              }
+            }
+          };
+        }, 'dsh-theme-switcher: themes and dictionaries');
+
         const t = locale.bind('dsh-theme-switcher');
 
-        // Регистрация выпадающего списка в подвале сайдбара
-        const unregisterSidebar = slots.inject('sidebar.footer.action', () => {
-          return slots.register({
-            name: 'sidebar.footer.action',
-            id: 'dsh-theme-selector',
-            order: 5,
-            label: () => t('themeSelectorLabel'),
-            locale: 'dsh-theme-switcher',
-          }, () => h(ThemeDropdown, { themeService, t }));
-        });
+        // Выпадающий список в подвале боковой панели.
+        slots.inject('sidebar.footer.action', () => slots.register({
+          name: 'sidebar.footer.action',
+          id: 'dsh-theme-selector',
+          order: 5,
+          label: () => t('themeSelectorLabel'),
+          locale: 'dsh-theme-switcher',
+        }, (props) => h(ThemeDropdown, {
+          themeService,
+          t,
+          wide: props && props.wide === true,
+        })));
 
-        // Регистрация страницы настроек темы
-        const unregisterSettings = slots.inject('settings.section', () => {
-          return slots.register({
-            name: 'settings.section',
-            id: 'dsh-theme-settings',
-            order: 10,
-            label: () => t('themeSettingsTitle'),
-            locale: 'dsh-theme-switcher',
-          }, () => h(ThemeSettingsPage, { themeService, t }));
-        });
-
-        // Функция очистки
-        return () => {
-          unregisterThemes.forEach(fn => { if (typeof fn === 'function') fn(); });
-          unregisterSidebar();
-          unregisterSettings();
-          unregEn();
-          unregZh();
-          unregRu();
-          unregisterLang();
-        };
+        // Страница «Тема» в настройках.
+        slots.inject('settings.section', () => slots.register({
+          name: 'settings.section',
+          id: 'dsh-theme-settings',
+          order: 12,
+          label: () => t('themeSettingsTitle'),
+          locale: 'dsh-theme-switcher',
+        }, () => h(ThemeSettingsPage, { themeService, t })));
       },
     };
   },
