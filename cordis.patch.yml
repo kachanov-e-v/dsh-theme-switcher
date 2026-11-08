@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-theme-switcher
+      name: '@local/dsh-theme-switcher'
+      config: {}

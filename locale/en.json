@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "Theme Switcher",
+    "description": "Switch between color themes from DESIGN.json with a dropdown selector"
+  },
+  "themeSelectorLabel": "Select theme",
+  "themeSettingsTitle": "Theme Settings",
+  "themeSettingsDescription": "Choose a color theme for the interface."
+}

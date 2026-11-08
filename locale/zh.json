@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "主题切换器",
+    "description": "通过下拉选择器在 DESIGN.json 的颜色主题之间切换"
+  },
+  "themeSelectorLabel": "选择主题",
+  "themeSettingsTitle": "主题设置",
+  "themeSettingsDescription": "选择界面的颜色主题。"
+}

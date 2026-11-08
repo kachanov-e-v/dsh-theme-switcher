@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Background circle -->
+  <circle cx="32" cy="32" r="28" fill="#2d2d2b"/>
+  <!-- Paint palette base -->
+  <path d="M32 12C22.7157 12 15 19.7157 15 29C15 38.2843 22.7157 46 32 46C41.2843 46 49 38.2843 49 29C49 19.7157 41.2843 12 32 12Z" fill="#1e1e2e" stroke="#444" stroke-width="1.5"/>
+  <!-- Color wells -->
+  <circle cx="22" cy="24" r="5" fill="#cc7d5e"/>
+  <circle cx="42" cy="24" r="5" fill="#e6b450"/>
+  <circle cx="22" cy="36" r="5" fill="#a7c080"/>
+  <circle cx="42" cy="36" r="5" fill="#cba6f7"/>
+  <!-- Thumb hole -->
+  <circle cx="12" cy="32" r="4" fill="#0d1117"/>
+  <circle cx="12" cy="32" r="2" fill="#2d2d2b"/>
+  <!-- Brush indicator -->
+  <path d="M46 18L50 14M46 14L50 18" stroke="#88c0d0" stroke-width="2" stroke-linecap="round"/>
+  <path d="M48 16L52 12" stroke="#88c0d0" stroke-width="1.5" stroke-linecap="round" opacity="0.6"/>
+</svg>

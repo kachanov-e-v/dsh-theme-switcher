@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "Переключатель тем",
+    "description": "Переключение между цветовыми темами из DESIGN.json через выпадающий список"
+  },
+  "themeSelectorLabel": "Выбрать тему",
+  "themeSettingsTitle": "Настройки темы",
+  "themeSettingsDescription": "Выберите цветовую тему для интерфейса."
+}
