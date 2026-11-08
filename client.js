@@ -117,7 +117,6 @@ function buildTokens(palette) {
   const labelCaption = mix(I, S, 0.6);
   const labelDimmed = mix(I, S, 0.55);
   const labelPrimaryDimmed = mix(I, S, 0.15);
-  const labelPrimaryForeground = onColor(S);
   const border = (a) => alpha(I, a);
 
   // Служебные состояния.
@@ -156,7 +155,7 @@ function buildTokens(palette) {
     '--dsw-alias-brand-primary': A,
     '--dsw-alias-brand-primary-invert': onColor(A),
     '--dsw-alias-brand-primary-new-colorprimary-new-color': A,
-    '--dsw-alias-brand-text': onColor(A),
+    '--dsw-alias-brand-text': A,
 
     // Кнопки
     '--dsw-alias-button-contrast-fill': I,
@@ -209,7 +208,7 @@ function buildTokens(palette) {
     '--dsw-alias-label-primary': I,
     '--dsw-alias-label-primary-bluish': I,
     '--dsw-alias-label-primary-dimmed': labelPrimaryDimmed,
-    '--dsw-alias-label-primary-foreground': labelPrimaryForeground,
+    '--dsw-alias-label-primary-foreground': onColor(A),
     '--dsw-alias-label-primary-inverted': S,
     '--dsw-alias-label-secondary': labelSecondary,
     '--dsw-alias-label-shimmer': alpha(I, 0.45),
@@ -218,11 +217,11 @@ function buildTokens(palette) {
 
     // Markdown
     '--dsw-alias-markdown-citation': adjust(S, 18 * delta),
-    '--dsw-alias-markdown-code-block': dark ? adjust(S, -8) : adjust(S, -4),
-    '--dsw-alias-markdown-code-block-banner': adjust(S, 8 * delta),
-    '--dsw-alias-markdown-code-segment-selected': adjust(S, 16 * delta),
-    '--dsw-alias-markdown-code-segment-unselected': dark ? adjust(S, -8) : adjust(S, -4),
-    '--dsw-alias-markdown-inline-code': adjust(S, 12 * delta),
+    '--dsw-alias-markdown-code-block': dark ? adjust(S, 6) : adjust(S, -6),
+    '--dsw-alias-markdown-code-block-banner': dark ? adjust(S, 12) : adjust(S, -10),
+    '--dsw-alias-markdown-code-segment-selected': dark ? adjust(S, 14) : adjust(S, -12),
+    '--dsw-alias-markdown-code-segment-unselected': dark ? adjust(S, 6) : adjust(S, -6),
+    '--dsw-alias-markdown-inline-code': dark ? adjust(S, 14) : adjust(S, -10),
     '--dsw-alias-markdown-placeholder': adjust(S, 12 * delta),
     '--dsw-alias-markdown-tag': adjust(S, 14 * delta),
 
