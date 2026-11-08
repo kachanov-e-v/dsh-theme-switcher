@@ -17,14 +17,14 @@
 2. Нажмите "Установить пакет"
 3. Введите URL репозитория GitHub:
    ```
-   https://github.com/YOUR_USERNAME/dsh-theme-switcher.git
+   https://github.com/kachanov-e-v/dsh-theme-switcher.git
    ```
 4. Плагин активируется автоматически
 
 ### Через CLI
 
 ```bash
-dsh plugin install https://github.com/YOUR_USERNAME/dsh-theme-switcher.git
+dsh plugin install https://github.com/kachanov-e-v/dsh-theme-switcher.git
 ```
 
 ### Локальная установка (для разработки)
@@ -42,7 +42,7 @@ cd C:\Users\Evgeniy\Desktop\dsh\Plugins\dsh-theme
    git init
    git add .
    git commit -m "feat: плагин переключения тем для DSH"
-   git remote add origin https://github.com/YOUR_USERNAME/dsh-theme-switcher.git
+   git remote add origin https://github.com/kachanov-e-v/dsh-theme-switcher.git
    git push -u origin main
    ```
 3. Пользователи смогут установить плагин по ссылке на репозиторий
