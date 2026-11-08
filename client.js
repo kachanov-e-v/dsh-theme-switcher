@@ -34,14 +34,243 @@ const THEME_DEFINITIONS_RAW = [
   {"codeThemeId":"codex","theme":{"accent":"#3a83f7","accentSource":"chatgpt","contrast":60,"fonts":{"code":null,"ui":null},"ink":"#ededed","opaqueWindows":true,"semanticColors":{"diffAdded":"#40c977","diffRemoved":"#fa423e","skill":"#ad7bf9"},"surface":"#000000"},"variant":"dark"}
 ];
 
+/* ---------- Цветовые утилиты ---------- */
+
+function parseColor(hex) {
+  if (typeof hex !== 'string') return null;
+  const match = /^#([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!match) return null;
+  const value = parseInt(match[1], 16);
+  return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+}
+
+function toHex({ r, g, b }) {
+  const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)));
+  return '#' + ((1 << 24) + (clamp(r) << 16) + (clamp(g) << 8) + clamp(b)).toString(16).slice(1);
+}
+
+/** Смешение двух HEX-цветов: t=0 → a, t=1 → b. */
+function mix(a, b, t) {
+  const A = parseColor(a);
+  const B = parseColor(b);
+  if (!A || !B) return a;
+  return toHex({
+    r: A.r + (B.r - A.r) * t,
+    g: A.g + (B.g - A.g) * t,
+    b: A.b + (B.b - A.b) * t,
+  });
+}
+
 /** Осветление/затемнение HEX-цвета на заданную величину. */
 function adjust(hex, amount) {
-  if (typeof hex !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(hex)) return hex;
-  const num = parseInt(hex.slice(1), 16);
-  const r = Math.max(0, Math.min(255, (num >> 16) + amount));
-  const g = Math.max(0, Math.min(255, ((num >> 8) & 0x00ff) + amount));
-  const b = Math.max(0, Math.min(255, (num & 0x0000ff) + amount));
-  return '#' + (0x1000000 + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  const color = parseColor(hex);
+  if (!color) return hex;
+  return toHex({ r: color.r + amount, g: color.g + amount, b: color.b + amount });
+}
+
+/** HEX-цвет → rgba() с прозрачностью. */
+function alpha(hex, value) {
+  const color = parseColor(hex);
+  if (!color) return hex;
+  return 'rgba(' + color.r + ', ' + color.g + ', ' + color.b + ', ' + value + ')';
+}
+
+/** Относительная яркость (WCAG) для выбора контрастного текста. */
+function luminance(hex) {
+  const color = parseColor(hex);
+  if (!color) return 0;
+  const channel = (v) => {
+    const value = v / 255;
+    return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
+}
+
+/** Контрастный цвет текста поверх фона. */
+function onColor(hex) {
+  return luminance(hex) > 0.5 ? '#0f0f11' : '#ffffff';
+}
+
+/**
+ * Полный набор токенов темы (алиасный слой DSH + служебные токены).
+ * Базовые стили DSH читают именно эти переменные, поэтому тема меняет
+ * фон, панели, границы, кнопки, меню, код, подсказки и т.д.
+ */
+function buildTokens(palette) {
+  const { surface: S, ink: I, accent: A, added: G, removed: R, skill: V, colorScheme } = palette;
+  const dark = colorScheme !== 'light';
+  const delta = dark ? 1 : -1;
+
+  // Слои поверхностей: в тёмной теме светлее фона, в светлой — темнее.
+  const layer1 = adjust(S, 10 * delta);
+  const layer2 = adjust(S, 20 * delta);
+  const layer3 = adjust(S, 28 * delta);
+  const layer4 = adjust(S, 34 * delta);
+  const overlay = dark ? adjust(S, 24) : mix(S, '#ffffff', 0.6);
+  const tooltipBg = dark ? adjust(S, 24) : mix(S, I, 0.88);
+  const toastBg = dark ? adjust(S, 22) : mix(S, I, 0.82);
+  const menuFill = alpha(adjust(S, 10 * delta), 0.64);
+
+  // Производные уровни текста.
+  const labelSecondary = mix(I, S, 0.35);
+  const labelTertiary = mix(I, S, 0.5);
+  const labelCaption = mix(I, S, 0.6);
+  const labelDimmed = mix(I, S, 0.55);
+  const labelPrimaryDimmed = mix(I, S, 0.15);
+  const labelPrimaryForeground = onColor(S);
+  const border = (a) => alpha(I, a);
+
+  // Служебные состояния.
+  const warn = '#f5a623';
+  const warnLabel = dark ? mix(warn, I, 0.35) : mix(warn, '#5c3a00', 0.45);
+
+  return {
+    // Фон и поверхности
+    '--dsw-alias-bg-base': S,
+    '--dsw-alias-bg-document-preview': dark ? adjust(S, -6) : adjust(S, -3),
+    '--dsw-alias-bg-document-selection': alpha(A, 0.35),
+    '--dsw-alias-bg-layer-1': layer1,
+    '--dsw-alias-bg-layer-2': layer2,
+    '--dsw-alias-bg-layer-3': layer3,
+    '--dsw-alias-bg-layer-4': layer4,
+    '--dsw-alias-bg-mask-1': 'rgba(0, 0, 0, 0.5)',
+    '--dsw-alias-bg-mask-2': 'rgba(0, 0, 0, 0.2)',
+    '--dsw-alias-bg-mask-3': 'rgba(0, 0, 0, 0.48)',
+    '--dsw-alias-bg-mask-drop': alpha(mix(S, I, 0.2), 0.7),
+    '--dsw-alias-bg-mask-photo': 'rgba(0, 0, 0, 0.88)',
+    '--dsw-alias-bg-module-platform': adjust(S, 8 * delta),
+    '--dsw-alias-bg-multi-select': alpha(A, 0.18),
+    '--dsw-alias-bg-overlay': overlay,
+    '--dsw-alias-bg-skeleton': alpha(I, 0.08),
+
+    // Границы
+    '--dsw-alias-border-inverted': alpha(I, 0.06),
+    '--dsw-alias-border-inverted2': alpha(I, 0.08),
+    '--dsw-alias-border-l1': border(0.06),
+    '--dsw-alias-border-l2': border(0.12),
+    '--dsw-alias-border-l2-darkmode-thin': border(0.06),
+    '--dsw-alias-border-l3': border(0.16),
+    '--dsw-alias-border-l4': border(0.2),
+
+    // Бренд
+    '--dsw-alias-brand-primary': A,
+    '--dsw-alias-brand-primary-invert': onColor(A),
+    '--dsw-alias-brand-primary-new-colorprimary-new-color': A,
+    '--dsw-alias-brand-text': onColor(A),
+
+    // Кнопки
+    '--dsw-alias-button-contrast-fill': I,
+    '--dsw-alias-button-elevated-fill': adjust(S, 16 * delta),
+    '--dsw-alias-button-floating-fill': adjust(S, 18 * delta),
+    '--dsw-alias-button-floating-hover': adjust(S, 24 * delta),
+    '--dsw-alias-button-ghost-active-border': alpha(I, 0.35),
+    '--dsw-alias-button-ghost-active-fill': alpha(I, 0.12),
+    '--dsw-alias-button-ghost-active-hover': alpha(I, 0.18),
+    '--dsw-alias-button-info-fill': A,
+    '--dsw-alias-button-info-hover': adjust(A, 12 * delta),
+    '--dsw-alias-button-primary-dimmed': alpha(A, 0.18),
+    '--dsw-alias-button-primary-fill': A,
+    '--dsw-alias-button-primary-hover': adjust(A, 14 * delta),
+    '--dsw-alias-button-tool-bar-fill': alpha(mix(S, I, 0.35), 0.5),
+    '--dsw-alias-button-tool-bar-fill-invisible': alpha(S, 0.36),
+    '--dsw-alias-button-tool-bar-hover': alpha(mix(S, I, 0.35), 0.6),
+
+    // Код и диффы
+    '--dsw-alias-code-diff-added': alpha(G, 0.14),
+    '--dsw-alias-code-diff-deleted': alpha(R, 0.14),
+    '--dsw-alias-file-diff-added-bg': mix(S, G, 0.18),
+    '--dsw-alias-file-diff-added-gutter': mix(S, G, 0.1),
+    '--dsw-alias-file-diff-added-marker': G,
+    '--dsw-alias-file-diff-deleted-bg': mix(S, R, 0.18),
+    '--dsw-alias-file-diff-deleted-gutter': mix(S, R, 0.1),
+    '--dsw-alias-file-diff-deleted-marker': R,
+
+    // Иллюстрации
+    '--dsw-alias-illustration-background': adjust(S, 10 * delta),
+    '--dsw-alias-illustration-backing': mix(S, I, 0.25),
+    '--dsw-alias-illustration-detail': mix(S, I, 0.45),
+    '--dsw-alias-illustration-inset': mix(S, I, 0.25),
+    '--dsw-alias-illustration-shadow': mix(S, I, 0.25),
+    '--dsw-alias-illustration-surface': mix(S, I, 0.35),
+
+    // Интерактивные подложки
+    '--dsw-alias-interactive-bg-active': alpha(I, 0.14),
+    '--dsw-alias-interactive-bg-hover': alpha(I, 0.08),
+    '--dsw-alias-interactive-bg-hover-accent': alpha(A, 0.24),
+    '--dsw-alias-interactive-bg-hover-danger': alpha(R, 0.15),
+    '--dsw-alias-interactive-bg-hover-solid': adjust(S, 16 * delta),
+
+    // Текст
+    '--dsw-alias-label-caption': labelCaption,
+    '--dsw-alias-label-deep-diving': mix(A, I, 0.55),
+    '--dsw-alias-label-deep-diving-shimmer': mix(A, I, 0.75),
+    '--dsw-alias-label-dimmed': labelDimmed,
+    '--dsw-alias-label-document-preview': mix(I, S, 0.25),
+    '--dsw-alias-label-primary': I,
+    '--dsw-alias-label-primary-bluish': I,
+    '--dsw-alias-label-primary-dimmed': labelPrimaryDimmed,
+    '--dsw-alias-label-primary-foreground': labelPrimaryForeground,
+    '--dsw-alias-label-primary-inverted': S,
+    '--dsw-alias-label-secondary': labelSecondary,
+    '--dsw-alias-label-shimmer': alpha(I, 0.45),
+    '--dsw-alias-label-tertiary': labelTertiary,
+    '--dsw-alias-link': A,
+
+    // Markdown
+    '--dsw-alias-markdown-citation': adjust(S, 18 * delta),
+    '--dsw-alias-markdown-code-block': dark ? adjust(S, -8) : adjust(S, -4),
+    '--dsw-alias-markdown-code-block-banner': adjust(S, 8 * delta),
+    '--dsw-alias-markdown-code-segment-selected': adjust(S, 16 * delta),
+    '--dsw-alias-markdown-code-segment-unselected': dark ? adjust(S, -8) : adjust(S, -4),
+    '--dsw-alias-markdown-inline-code': adjust(S, 12 * delta),
+    '--dsw-alias-markdown-placeholder': adjust(S, 12 * delta),
+    '--dsw-alias-markdown-tag': adjust(S, 14 * delta),
+
+    // Меню и прокрутка
+    '--dsw-alias-menu-group-header-fill': alpha(adjust(S, 8 * delta), 0.94),
+    '--dsw-alias-menu-icon': labelPrimaryDimmed,
+    '--dsw-alias-scrollbar-bg-l1': alpha(I, 0.18),
+    '--dsw-alias-scrollbar-bg-l2': alpha(I, 0.28),
+    '--dsw-alias-scrollbar-hover-l1': alpha(I, 0.28),
+    '--dsw-alias-scrollbar-hover-l2': alpha(I, 0.4),
+
+    // Статусы
+    '--dsw-alias-state-business-primary': V,
+    '--dsw-alias-state-business-tertiary': mix(S, V, 0.25),
+    '--dsw-alias-state-done-primary': V,
+    '--dsw-alias-state-error-primary': R,
+    '--dsw-alias-state-error-secondary': R,
+    '--dsw-alias-state-idle-primary': mix(I, S, 0.45),
+    '--dsw-alias-state-success-primary': G,
+    '--dsw-alias-state-success-secondary': G,
+    '--dsw-alias-state-success-tertiary': mix(S, G, 0.25),
+    '--dsw-alias-state-warn-label': warnLabel,
+    '--dsw-alias-state-warn-primary': warn,
+    '--dsw-alias-state-warn-secondary': adjust(warn, 12),
+    '--dsw-alias-state-warn-tertiary': mix(S, warn, 0.25),
+
+    // Служебные элементы
+    '--dsw-alias-switch-thumb': I,
+    '--dsw-alias-toast-bg': toastBg,
+    '--dsw-alias-toast-label': onColor(toastBg),
+    '--dsw-alias-tooltip-bg': tooltipBg,
+    '--dsw-alias-tooltip-key-bg': mix(tooltipBg, I, 0.18),
+    '--dsw-alias-turn-trigger-bg': alpha(I, 0.08),
+    '--dsw-alias-turn-trigger-bg-hover': alpha(I, 0.14),
+    '--dsw-menu-surface-fill': menuFill,
+
+    // Специфичные поверхности
+    '--dsw-specific-bubble': adjust(S, 14 * delta),
+    '--dsw-specific-bubble-highlight': adjust(S, 20 * delta),
+    '--dsw-specific-input-major': adjust(S, 12 * delta),
+    '--dsw-specific-login-input': adjust(S, 6 * delta),
+    '--dsw-specific-menu': menuFill,
+    '--dsw-specific-selector': adjust(S, 16 * delta),
+    '--dsw-specific-sidebar-fill': adjust(S, 4 * delta),
+    '--dsw-specific-sidebar-nav-item-active': alpha(I, 0.1),
+    '--dsw-specific-sidebar-nav-item-active-accent': alpha(A, 0.18),
+    '--dsw-specific-tip': adjust(S, 16 * delta),
+  };
 }
 
 /**
@@ -52,27 +281,19 @@ function convertTheme(raw) {
   const { codeThemeId, theme } = raw;
   const { accent, ink, semanticColors, surface } = theme;
   const colorScheme = raw.variant === 'light' ? 'light' : 'dark';
-  const delta = colorScheme === 'dark' ? 1 : -1;
 
   return {
     id: codeThemeId,
     colorScheme,
-    tokens: {
-      '--dsw-alias-bg-base': surface,
-      '--dsw-alias-bg-layer-1': adjust(surface, 10 * delta),
-      '--dsw-alias-bg-layer-2': adjust(surface, 20 * delta),
-      '--dsw-alias-bg-overlay': adjust(surface, 15 * delta),
-      '--dsw-alias-border-l1': adjust(ink, -60 * delta),
-      '--dsw-alias-border-l2': adjust(ink, -40 * delta),
-      '--dsw-alias-brand-primary': accent,
-      '--dsw-alias-label-primary': ink,
-      '--dsw-alias-label-secondary': adjust(ink, -30 * delta),
-      '--dsw-alias-state-error-primary': semanticColors.diffRemoved,
-      '--dsw-alias-state-idle-primary': adjust(accent, -20),
-      '--dsw-alias-state-success-primary': semanticColors.diffAdded,
-      '--dsw-alias-state-warn-primary': '#f5a623',
-      '--dsw-specific-sidebar-fill': adjust(surface, 5 * delta),
-    },
+    tokens: buildTokens({
+      surface,
+      ink,
+      accent,
+      added: semanticColors.diffAdded,
+      removed: semanticColors.diffRemoved,
+      skill: semanticColors.skill || '#ad7bf9',
+      colorScheme,
+    }),
   };
 }
 
