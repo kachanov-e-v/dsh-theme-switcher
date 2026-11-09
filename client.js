@@ -348,7 +348,7 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useRef } = React;
 
     /** Выпадающий список тем. `wide` — развёрнута ли боковая панель. */
-    function ThemeDropdown({ t, wide, getActiveTheme, subscribeTheme, selectTheme }) {
+    function ThemeDropdown({ t, wide, getActiveTheme, subscribeTheme, selectTheme, selectBuiltin }) {
       const [open, setOpen] = useState(false);
       const [currentId, setCurrentId] = useState(() => getActiveTheme());
       const [rect, setRect] = useState(null);
@@ -453,6 +453,66 @@ window.__ModuleLoader__.load({
         })),
       ]);
 
+      const builtinOption = (id, label) => h('button', {
+        key: id,
+        type: 'button',
+        role: 'option',
+        'aria-selected': currentId === id,
+        onClick: () => {
+          try {
+            selectBuiltin(id);
+          } catch (error) {
+            console.error('dsh-theme-switcher: не удалось переключить тему', error);
+          }
+          setOpen(false);
+        },
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          padding: '8px 10px',
+          border: 0,
+          borderRadius: 6,
+          background: 'transparent',
+          color: 'var(--dsw-alias-label-primary)',
+          fontSize: 13,
+          fontFamily: 'inherit',
+          cursor: 'pointer',
+          textAlign: 'left',
+        },
+      }, [
+        h('span', {
+          key: 'dot',
+          style: {
+            width: 12,
+            height: 12,
+            borderRadius: 3,
+            backgroundColor: 'var(--dsw-alias-bg-layer-2)',
+            border: '1px solid var(--dsw-alias-border-l2)',
+            flexShrink: 0,
+          },
+        }),
+        h('span', {
+          key: 'name',
+          style: { flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+        }, label),
+        currentId === id && h('svg', {
+          key: 'check',
+          width: 14,
+          height: 14,
+          viewBox: '0 0 16 16',
+          fill: 'none',
+          style: { flexShrink: 0 },
+        }, h('path', {
+          d: 'M3.5 8L7 11.5L12.5 4',
+          stroke: 'currentColor',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        })),
+      ]);
+
       const menu = open && h('div', {
         role: 'listbox',
         'aria-label': t('themeSelectorLabel'),
@@ -470,7 +530,8 @@ window.__ModuleLoader__.load({
           zIndex: 1000,
           padding: 4,
         },
-      }, THEMES.map((theme) => h('button', {
+      }, [
+        ...THEMES.map((theme) => h('button', {
         key: theme.id,
         type: 'button',
         role: 'option',
@@ -528,7 +589,14 @@ window.__ModuleLoader__.load({
           strokeLinecap: 'round',
           strokeLinejoin: 'round',
         })),
-      ])));
+      ])),
+        h('div', {
+          key: 'separator',
+          style: { height: 1, margin: '4px 6px', background: 'var(--dsw-alias-border-l1)' },
+        }),
+        builtinOption('light', t('builtinLight')),
+        builtinOption('dark', t('builtinDark')),
+      ]);
 
       return h('div', {
         ref: rootRef,
@@ -537,7 +605,7 @@ window.__ModuleLoader__.load({
     }
 
     /** Страница настроек темы с карточками предпросмотра. */
-    function ThemeSettingsPage({ t, getActiveTheme, subscribeTheme, selectTheme }) {
+    function ThemeSettingsPage({ t, getActiveTheme, subscribeTheme, selectTheme, selectBuiltin }) {
       const [currentId, setCurrentId] = useState(() => getActiveTheme());
 
       useEffect(() => {
@@ -553,6 +621,30 @@ window.__ModuleLoader__.load({
           console.error('dsh-theme-switcher: не удалось переключить тему', error);
         }
       };
+
+      const builtinCard = (id, label) => h('button', {
+        key: id,
+        type: 'button',
+        onClick: () => {
+          try {
+            selectBuiltin(id);
+          } catch (error) {
+            console.error('dsh-theme-switcher: не удалось переключить тему', error);
+          }
+        },
+        style: {
+          padding: '10px 14px',
+          border: '2px solid ' + (currentId === id
+            ? 'var(--dsw-alias-brand-primary)'
+            : 'var(--dsw-alias-border-l1)'),
+          borderRadius: 8,
+          background: 'var(--dsw-alias-bg-layer-1)',
+          color: 'var(--dsw-alias-label-primary)',
+          fontSize: 13,
+          fontFamily: 'inherit',
+          cursor: 'pointer',
+        },
+      }, label);
 
       return h('div', {
         style: { padding: 16, display: 'flex', flexDirection: 'column', gap: 16 },
@@ -638,6 +730,17 @@ window.__ModuleLoader__.load({
             style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
           }, theme.colorScheme === 'dark' ? 'тёмная' : 'светлая'),
         ]))),
+        h('h3', {
+          key: 'builtin-title',
+          style: { margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' },
+        }, t('builtinTitle')),
+        h('div', {
+          key: 'builtin-row',
+          style: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+        }, [
+          builtinCard('light', t('builtinLight')),
+          builtinCard('dark', t('builtinDark')),
+        ]),
       ]);
     }
 
@@ -664,6 +767,7 @@ window.__ModuleLoader__.load({
               themeSettingsDescription: 'Choose a color theme for the interface.',
               builtinLight: 'Light (DSH)',
               builtinDark: 'Dark (DSH)',
+              builtinTitle: 'DSH built-in themes',
             },
             zh: {
               themeSelectorLabel: '选择主题',
@@ -671,6 +775,7 @@ window.__ModuleLoader__.load({
               themeSettingsDescription: '选择界面的颜色主题。',
               builtinLight: '浅色 (DSH)',
               builtinDark: '深色 (DSH)',
+              builtinTitle: 'DSH 内置主题',
             },
             ru: {
               themeSelectorLabel: 'Выбрать тему',
@@ -678,6 +783,7 @@ window.__ModuleLoader__.load({
               themeSettingsDescription: 'Выберите цветовую тему для интерфейса.',
               builtinLight: 'Светлая (DSH)',
               builtinDark: 'Тёмная (DSH)',
+              builtinTitle: 'Встроенные темы DSH',
             },
           };
           for (const [id, dict] of Object.entries(dictionaries)) {
@@ -717,8 +823,13 @@ window.__ModuleLoader__.load({
           themeService.setTheme(id);
         };
 
+        // Выбор встроенной темы DSH: забываем свою и отдаём управление Appearance.
+        const selectBuiltin = (id) => {
+          writeStoredTheme(undefined);
+          themeService.setTheme(id);
+        };
+
         const themeListeners = new Set();
-        const restoreWindowUntil = Date.now() + 4000;
 
         /** Вернуть сохранённую тему, если DSH сейчас показывает встроенную. */
         const applyStoredTheme = () => {
@@ -742,14 +853,9 @@ window.__ModuleLoader__.load({
           const off = ctx.on('theme/change', () => {
             const snapshot = themeService.getTheme();
             if (!isCustomTheme(snapshot.preference) && readStoredTheme() !== undefined) {
-              if (Date.now() < restoreWindowUntil) {
-                // Хост применил сохранённую встроенную тему после старта —
-                // возвращаем выбранную тему плагина.
-                window.setTimeout(applyStoredTheme, 0);
-              } else {
-                // Пользователь сам выбрал встроенную тему — забываем свою.
-                writeStoredTheme(undefined);
-              }
+              // DSH снова применил встроенную тему — после перезагрузки, смены
+              // модели или синхронизации настроек. Возвращаем тему плагина.
+              window.setTimeout(applyStoredTheme, 0);
             }
             for (const listener of [...themeListeners]) {
               try {
@@ -767,7 +873,7 @@ window.__ModuleLoader__.load({
         // Настройки DSH приходят с хоста асинхронно — пробуем восстановить
         // сохранённую тему несколько раз после старта страницы.
         ctx.effect(() => {
-          const timers = [0, 250, 1000, 2500].map((delay) => window.setTimeout(applyStoredTheme, delay));
+          const timers = [0, 200, 600, 1200, 2500, 5000].map((delay) => window.setTimeout(applyStoredTheme, delay));
           return () => {
             for (const timer of timers) window.clearTimeout(timer);
           };
@@ -794,6 +900,7 @@ window.__ModuleLoader__.load({
           getActiveTheme,
           subscribeTheme,
           selectTheme,
+          selectBuiltin,
         })));
 
         // Страница «Тема» в настройках.
@@ -803,7 +910,7 @@ window.__ModuleLoader__.load({
           order: 12,
           label: () => t('themeSettingsTitle'),
           locale: 'dsh-theme-switcher',
-        }, () => h(ThemeSettingsPage, { t, getActiveTheme, subscribeTheme, selectTheme })));
+        }, () => h(ThemeSettingsPage, { t, getActiveTheme, subscribeTheme, selectTheme, selectBuiltin })));
       },
     };
   },
